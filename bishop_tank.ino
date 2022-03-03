@@ -1,5 +1,5 @@
 /*
-  Bishop - RC Inspection Tank
+  RC Inspection Tank
 
   - Flysky FS-I6X RC Transmitter loaded with OpenTX firmware
   - Fli14+ 14CH Mini Receiver 2A receiver
@@ -85,6 +85,10 @@ float rcCH6_prev = 0;
 
 int panCenter = 400;
 int tiltCenter = 320;
+
+int panPort=0;
+int tiltPort=1;
+int lightPort=2;
 
 // Motor A Control Connections
 #define pwmA 3
@@ -201,29 +205,35 @@ void setup()
   pwm.setPWMFreq(SERVO_FREQ);  // Analog servos run at ~50 Hz updates
 
   // center the camera
-  pwm.setPWM(0, 100, panCenter ); // pan
-  pwm.setPWM(1, 100, tiltCenter );  // tilt
+
+  pwm.setPWM(panPort, 100, panCenter ); // pan
+  pwm.setPWM(tiltPort, 100, tiltCenter );  // tilt
+  delay(100);
 
   // wiggle it a bit to show power up
+  int shake_range = 50;
+  int shake_rate = 5;
+  int shake_delay = 10;
   Serial.println("Shake the camera to say hello.");
-  for(int i=panCenter;i<=panCenter + 100;i=i+1){
-    pwm.setPWM(0, 10, i );
-    Serial.println(i);
-    delay(1);
+  delay(100);
+  
+  for(int i = panCenter;i<=panCenter + shake_range;i = i + shake_rate){
+    pwm.setPWM(panPort, 100, i );
+    //Serial.println(i);
+    delay(shake_delay + shake_rate);
   }
-  for(int i=panCenter+100;i>=panCenter-100;i=i-1){
-    pwm.setPWM(0, 10, i );
-    Serial.println(i);
-    delay(1);
+  for(int i = panCenter + shake_range;i>=panCenter - shake_range;i = i - shake_rate){
+    pwm.setPWM(panPort, 100, i );
+    //Serial.println(i);
+    delay(shake_delay + shake_rate);
   }
-    for(int i=panCenter-100;i<=panCenter;i=i+1){
-    pwm.setPWM(0, 10, i );
-    Serial.println(i);
-    delay(1);
+    for(int i = panCenter - shake_range;i<=panCenter;i = i + shake_rate){
+    pwm.setPWM(panPort, 100, i );
+    //Serial.println(i);
+    delay(shake_delay + shake_rate);
   }
-  pwm.setPWM(2, 0,0);
-  delay(100000);
-
+  pwm.setPWM(lightPort, 100, 0);
+  
   // Keep motors on standby for two seconds
   digitalWrite(stby, LOW);
   delay (2000);
@@ -259,14 +269,14 @@ void loop() {
 
   if(rcCH10){
      if(rcCH9){ // head track
-        rcCH5 = readChannel(6,600,110,0);
-        rcCH6 = readChannel(7,110,600,0);
+        rcCH5 = readChannel(6, -512, 512, 0) / 4; //pan
+        rcCH6 = readChannel(7, -512, 512, 0) / 4; //tilt
      } else { // knobs
-        rcCH5 = readChannel(4,600,110,0);
-        rcCH6 = readChannel(5,110,600,0);
+        rcCH5 = readChannel(4, -512, 512, 0) / 4;
+        rcCH6 = readChannel(5, -512, 512, 0) / 4;
      }
-     rcCH5_smooth = (rcCH5 *.15) + (rcCH5_prev * .85);
-     rcCH6_smooth = (rcCH6 *.15) + (rcCH6_prev * .85);  
+     rcCH5_smooth = ((rcCH5 + panCenter) *.15) + (rcCH5_prev * .85);
+     rcCH6_smooth = ((rcCH6 + tiltCenter) *.15) + (rcCH6_prev * .85);  
   } else { // switch D off (up)
      rcCH5=panCenter;
      rcCH6=tiltCenter;
@@ -274,6 +284,8 @@ void loop() {
      rcCH6_smooth = rcCH6;
   }
   
+  //printf("Pan:%5i Tilt:%5i \n", int(rcCH5_smooth), int(rcCH6_smooth));
+    
   rcCH5_prev = rcCH5_smooth;
   rcCH6_prev = rcCH6_smooth;
 
@@ -329,12 +341,11 @@ void loop() {
   mControlB(MotorSpeedB, MotorDirB);
 
   // Camera Control
-  pwm.setPWM(0, 100, int(rcCH5_smooth) ); //pan
-  pwm.setPWM(1, 100, int(rcCH6_smooth) ); //tilt
+  pwm.setPWM(panPort, 100, int(rcCH5_smooth) ); //pan
+  pwm.setPWM(tiltPort, 100, int(rcCH6_smooth) ); //tilt
 
-  pwm.setPWM(2, 0, int(rcCH3));
+  pwm.setPWM(lightPort, 0, int(rcCH3));
   
- 
   // Print values to serial monitor for debugging
   printf("1:%3i 2:%3i 5:%3.0f 6:%3.0f A:%o B:%o MA:%3i MB:%3i Mdir:" \
   ,rcCH1, rcCH2, rcCH5_smooth, rcCH6_smooth, rcCH9, rcCH10, MotorSpeedA, MotorSpeedB);
