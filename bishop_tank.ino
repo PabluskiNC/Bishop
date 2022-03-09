@@ -7,12 +7,12 @@
   - TB6612FNG H-Bridge Motor Controller to drive two DC Motors
 
   - Adafruit PWM 16 Ch servo driver
-  VBA controls tilt (CH9)
-  VBB controls pan (CH10)  
+  VBA controls tilt
+  VBB controls pan
 
   - Head tracker (https://headtracker.gitbook.io/head-tracker/) connected to the FlySky
-  CH7 tilt
-  CH8 pan
+  TRCH6 tilt
+  TRCH7 pan
 
   Right stick controls Forward and backward direction (CH1) and turning (CH2).
   SWD controls the camera pan and tilt; 
@@ -20,8 +20,6 @@
     - On allows two modes based on SWA:
        - SWA off control via VBA and VBB
        - SWA on - controls via haedtracker
-
-  
 
   Based on ... 
     fsi6x-RC-car-spin.ino at https://dronebotworkshop.com/radio-control-arduino-car/
@@ -55,40 +53,62 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 // for max range. You'll have to tweak them as necessary to match the servos you
 // have!
 
-#define SERVOMIN  150 // This is the 'minimum' pulse length count (out of 4096)
-#define SERVOMAX  450 // This is the 'maximum' pulse length count (out of 4096)
-#define USMIN  600 // This is the rounded 'minimum' microsecond length based on the minimum pulse of 150
-#define USMAX  2400 // This is the rounded 'maximum' microsecond length based on the maximum pulse of 600
-#define SERVO_FREQ 50 // Analog servos run at ~50 Hz updates
+#define SERVOMIN    150 // This is the 'minimum' pulse length count (out of 4096)
+#define SERVOMAX    450 // This is the 'maximum' pulse length count (out of 4096)
+#define USMIN       600 // This is the rounded 'minimum' microsecond length based on the minimum pulse of 150
+#define USMAX      2400 // This is the rounded 'maximum' microsecond length based on the maximum pulse of 600
+#define SERVO_FREQ   50 // Analog servos run at ~50 Hz updates
 
-String Mdir = "unk";
+// Define the FS-i6X Channel usage
 
-// Channel Values
+#define LEFTRIGHT  0
+#define FWDBACK    1
+#define LEDLIGHT   2
+#define VARPOTA    4
+#define VARPOTB    5
 
-int rcCH1 = 0; // Left - Right
-int rcCH2 = 0; // Forward - Reverse
-int rcCH3 = 0; // LED lights
+#define SWA        6
+#define SWB        7
+#define SWC        8
+#define SWD        9
 
-int rcCH5 = 0; // camera pan
-int rcCH6 = 0; // camera tilt
+#define headTrackPan  10
+#define headTrackTilt 11
+#define headTrackRoll 12
 
-int rcCH7 = 0; // TR camera pan
-int rcCH8 = 0; // TR camera tilt
+String motorDir = "unk";
 
-bool rcCH10 = 0; // Camera face - front (0) or move (1)
-bool rcCH9 = 0;  // camera move - knobs(0) or head track(1)
+int turnDirection = 0; // Left - Right
+int motorSpeed = 0; // Forward - Reverse
 
-float rcCH5_smooth = 0;
-float rcCH5_prev = 0;
-float rcCH6_smooth = 0;
-float rcCH6_prev = 0;
+int headLights = 0; // LED lights
 
-int panCenter = 400;
-int tiltCenter = 320;
+int panVal = 0; // camera pan
+int tiltVal = 0; // camera tilt
 
-int panPort=0;
-int tiltPort=1;
-int lightPort=2;
+int rcHTpan  = 0; // TR camera pan
+int rcHTtilt = 0; // TR camera tilt
+
+
+bool  CamSwitch = 0;  // camera move - knobs(0) or head track(1)
+bool  motorsOn = 0;  
+int   driveMode = 0; 
+bool  CamFront = 0;  // Camera face - front (0) or move (1)
+
+float panVal_smooth = 0;
+float panVal_prev = 0;
+float tiltVal_smooth = 0;
+float tiltVal_prev = 0;
+
+#define panCenter  400
+#define tiltCenter 320
+
+// PWM assignments
+#define panPort 0
+#define tiltPort 1
+#define lightPort 2
+
+// TB6612FNG motor control chip
 
 // Motor A Control Connections
 #define pwmA 3
@@ -165,7 +185,6 @@ bool readSwitch(byte channelInput, bool defaultValue) {
 }
 
 void setup()
-
 {
 
   // Start serial monitor for debugging
@@ -206,14 +225,15 @@ void setup()
 
   // center the camera
 
-  pwm.setPWM(panPort, 100, panCenter ); // pan
+  pwm.setPWM(panPort,  100, panCenter );   // pan
   pwm.setPWM(tiltPort, 100, tiltCenter );  // tilt
   delay(100);
 
   // wiggle it a bit to show power up
-  int shake_range = 50;
-  int shake_rate = 5;
-  int shake_delay = 10;
+  #define shake_range 50
+  #define shake_rate   5
+  #define shake_delay 10
+  
   Serial.println("Shake the camera to say hello.");
   delay(100);
   
@@ -260,42 +280,54 @@ void setServoPulse(uint8_t n, double pulse) {
 void loop() {
 
   // Get RC channel values
-  rcCH1 = readChannel(0, -255, 255, 0);
-  rcCH2 = readChannel(1, -255, 255, 0);
-  rcCH3 = readChannel(2, 0, 255, 0);
+  turnDirection = readChannel(LEFTRIGHT, -255, 255, 0);
+  motorSpeed    = readChannel(FWDBACK,   -255, 255, 0);
+  headLights    = readChannel(LEDLIGHT,  0, 1000, 0);
   
-  rcCH9 = readSwitch(8,false);
-  rcCH10 = readSwitch(9,false);
-
-  if(rcCH10){
-     if(rcCH9){ // head track
-        rcCH5 = readChannel(6, -512, 512, 0) / 4; //pan
-        rcCH6 = readChannel(7, -512, 512, 0) / 4; //tilt
-     } else { // knobs
-        rcCH5 = readChannel(4, -512, 512, 0) / 4;
-        rcCH6 = readChannel(5, -512, 512, 0) / 4;
-     }
-     rcCH5_smooth = ((rcCH5 + panCenter) *.15) + (rcCH5_prev * .85);
-     rcCH6_smooth = ((rcCH6 + tiltCenter) *.15) + (rcCH6_prev * .85);  
-  } else { // switch D off (up)
-     rcCH5=panCenter;
-     rcCH6=tiltCenter;
-     rcCH5_smooth = rcCH5;
-     rcCH6_smooth = rcCH6;
+  
+  CamSwitch = readSwitch(SWA,false);
+  motorsOn  = readSwitch(SWB,false);
+  driveMode = readChannel(SWC,-512,512,0); // Three way...  <0 ; 0 ; >0
+  CamFront  = readSwitch(SWD,false);
+  
+  if(driveMode<0){
+    if(CamFront){
+       if(CamSwitch){ // head track
+          panVal  = readChannel(headTrackPan,  -512, 512, 0) /2 ;
+          tiltVal = readChannel(headTrackTilt, -512, 512, 0) /2 ; 
+          
+       } else { // knobs
+          panVal  = readChannel(VARPOTA, -512, 512, 0) / 3;
+          tiltVal = readChannel(VARPOTB, -512, 512, 0) / 3;
+          
+       }
+       panVal_smooth  = ((panVal  + panCenter ) *.15) + (panVal_prev  * .85);
+       tiltVal_smooth = ((tiltVal + tiltCenter) *.15) + (tiltVal_prev * .85);
+    } else { // Face front
+       panVal         = panCenter;
+       tiltVal        = tiltCenter;
+       panVal_smooth  = panVal;
+       tiltVal_smooth = tiltVal;
+    }
+  } else {
+       panVal         = panCenter;
+       tiltVal        = tiltCenter;
+       panVal_smooth  = panVal;
+       tiltVal_smooth = tiltVal;
+       turnDirection  = -1 * readChannel(headTrackPan,  -512, 512, 0) / 4 ;
   }
   
-  //printf("Pan:%5i Tilt:%5i \n", int(rcCH5_smooth), int(rcCH6_smooth));
+  //printf("Pan:%5i Tilt:%5i, CamFront: %i \n", int(panVal), int(tiltVal), CamFront);
+  //printf("Pan:%5i Tilt:%5i \n", int(panVal_smooth), int(tiltVal_smooth));
     
-  rcCH5_prev = rcCH5_smooth;
-  rcCH6_prev = rcCH6_smooth;
-
-  // Get channel 1 + 2 speed
+  panVal_prev = panVal_smooth;
+  tiltVal_prev = tiltVal_smooth;
 
   // Set left/right offset with channel 1 value
-  MotorSpeedA = rcCH2 - rcCH1;
-  MotorSpeedB = rcCH2 + rcCH1;
+  MotorSpeedA = motorSpeed - turnDirection;
+  MotorSpeedB = motorSpeed + turnDirection;
 
-  // Set forward/backward direction with channel 2 value
+  // Set forward/backward direction
   if (MotorSpeedA < 0) {
     //Forward
     MotorDirA = 0;
@@ -305,7 +337,7 @@ void loop() {
   }
   
   if (MotorSpeedB < 0) {
-    MotorDirB = 0;
+    MotorDirB = 0; 
     MotorSpeedB = abs(MotorSpeedB);
   } else {
     MotorDirB = 1;
@@ -313,23 +345,24 @@ void loop() {
 
   switch(MotorDirA*10+MotorDirB) {
     case 0:
-       Mdir="Rev";
+       motorDir="Rev";
        break;
     case 1:
-       Mdir="RT";
+       motorDir="RT";
        break;
     case 10:
-       Mdir="LT";
+       motorDir="LT";
        break;
     case 11:
-       Mdir="Fwd";
+       motorDir="Fwd";
        break;
   }
 
-  if (MotorSpeedA + MotorSpeedB <= 4) {
-    Mdir = "Stp";
-    MotorSpeedA = 0;
-    MotorSpeedB = 0;
+  // ignore near zero values
+  if ((MotorSpeedA + MotorSpeedB <= 4) || (motorsOn == 0)) {
+     motorDir = "Stp";
+     MotorSpeedA = 0;
+     MotorSpeedB = 0;
   }
 
   // Ensure that speeds are between 0 and 255
@@ -341,17 +374,18 @@ void loop() {
   mControlB(MotorSpeedB, MotorDirB);
 
   // Camera Control
-  pwm.setPWM(panPort, 100, int(rcCH5_smooth) ); //pan
-  pwm.setPWM(tiltPort, 100, int(rcCH6_smooth) ); //tilt
+  pwm.setPWM(panPort,   100, int(panVal_smooth)  ); //pan
+  pwm.setPWM(tiltPort,  100, int(tiltVal_smooth) ); //tilt
 
-  pwm.setPWM(lightPort, 0, int(rcCH3));
-  
+  pwm.setPWM(lightPort,   5, int(headLights)     );
+
   // Print values to serial monitor for debugging
-  printf("1:%3i 2:%3i 5:%3.0f 6:%3.0f A:%o B:%o MA:%3i MB:%3i Mdir:" \
-  ,rcCH1, rcCH2, rcCH5_smooth, rcCH6_smooth, rcCH9, rcCH10, MotorSpeedA, MotorSpeedB);
-  Serial.println(Mdir);
+  printf("1:%3i 2:%3i 5:%3.0f 6:%3.0f A:%o B:%o MA:%3i MB:%3i motorDir:" \
+  ,turnDirection, motorSpeed, panVal_smooth, tiltVal_smooth, CamSwitch, CamFront, MotorSpeedA, MotorSpeedB);
+  //printf("%s\n", motorDir);
+   Serial.println(motorDir);
  
   // Slight delay
-  //delay(50);
+  // delay(50);
 
 }
